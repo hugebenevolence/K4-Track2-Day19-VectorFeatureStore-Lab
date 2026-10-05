@@ -65,7 +65,7 @@ def main() -> int:
         print(f"missing {corpus} -- run `make seed` first")
         return 1
 
-    print("building index (embeds 1000 docs, ~15 s)…")
+    print("building/reusing index for 1000 docs (bge-m3 on CPU may take minutes)…")
     index = FilteredIndex.from_searcher(Searcher.from_corpus(corpus))
 
     out = ROOT / "data" / "agent_queries.jsonl"

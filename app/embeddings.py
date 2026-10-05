@@ -25,6 +25,8 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
+from app import config as _config  # noqa: F401  -- load .env before backend selection
+
 DEFAULT_BACKEND = "fastembed"
 
 

@@ -1,7 +1,7 @@
 """Docker path smoke test.
 
-Verifies all 3 services brought up by docker-compose are reachable + Feast
-can talk to the Redis online store. Run via `make verify-docker`.
+Verifies all 3 services brought up by docker-compose are reachable and Feast
+is configured for PostgreSQL sources and Redis serving. Run via `make verify-docker`.
 """
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ import socket
 import sys
 import traceback
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -33,6 +35,16 @@ def can_reach(host: str, port: int, timeout: float = 2.0) -> bool:
 def main() -> int:
     print("Day 19 docker smoke test")
     try:
+        sys.path.insert(0, str(ROOT))
+        from app import config as _config  # noqa: F401  -- load .env
+        feast_config = yaml.safe_load(
+            (ROOT / "app" / "feast_repo" / "feature_store.yaml").read_text(encoding="utf-8")
+        )
+        assert os.getenv("QDRANT_MODE") == "server", "Run `bash setup-docker.sh` to select Docker mode."
+        assert os.getenv("FEAST_OFFLINE_STORE") == "postgres", "Feast source mode is not postgres."
+        assert feast_config["online_store"]["type"] == "redis", "Feast online store is not Redis."
+        assert feast_config["offline_store"]["type"] == "postgres", "Feast offline store is not Postgres."
+
         # ── 1. Qdrant server ────────────────────────────────────────────
         step("Qdrant server reachable on :6333")
         assert can_reach("localhost", 6333), \
@@ -66,8 +78,15 @@ def main() -> int:
 
         # ── 5. FastAPI app imports ──────────────────────────────────────
         step("FastAPI app imports without error")
-        sys.path.insert(0, str(ROOT))
         from app import main as app_main  # noqa: F401
+
+        # Feast definitions must use PostgreSQLSource, not a Parquet FileSource.
+        step("Feast definitions point to PostgreSQL sources")
+        from app.feast_repo.feature_views import user_profile_source
+        from feast.infra.offline_stores.contrib.postgres_offline_store.postgres_source import (
+            PostgreSQLSource,
+        )
+        assert isinstance(user_profile_source, PostgreSQLSource)
 
         print("\nAll checks passed — docker stack is ready. Run `make api`.")
         print("  Qdrant dashboard: http://localhost:6333/dashboard")

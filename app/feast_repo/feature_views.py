@@ -24,12 +24,16 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+import os
+
+from dotenv import load_dotenv
 
 from feast import Entity, FeatureView, Field, FileSource, ValueType
 from feast.types import Float32, Int64, String
 
 # Resolve relative to this file so `feast apply` works regardless of cwd.
 _REPO_ROOT = Path(__file__).resolve().parent
+load_dotenv(_REPO_ROOT.parent.parent / ".env", override=False)
 _DATA_DIR = _REPO_ROOT / "data"
 _DATA_DIR.mkdir(exist_ok=True)
 
@@ -51,25 +55,36 @@ item = Entity(
 
 
 # ── Sources ─────────────────────────────────────────────────────────────
-# Each FileSource points to a Parquet file the student generates in NB4
-# (notebooks/04_feast_feature_store.py builds these from the corpus + synthetic
-# user activity). The schema each source produces is mirrored in the FeatureView.
-user_profile_source = FileSource(
+# NB4 writes Parquet for Lite and PostgreSQL tables for Docker. Feast's offline
+# store requires a matching source type; the schemas are identical in both.
+if os.getenv("FEAST_OFFLINE_STORE", "file") == "postgres":
+    from feast.infra.offline_stores.contrib.postgres_offline_store.postgres_source import (
+        PostgreSQLSource,
+    )
+
+    def source(name: str, table: str):
+        return PostgreSQLSource(name=name, table=table, timestamp_field="event_timestamp")
+else:
+    def source(name: str, table: str):
+        return FileSource(
+            name=name, path=str(_DATA_DIR / f"{table}.parquet"),
+            timestamp_field="event_timestamp",
+        )
+
+
+user_profile_source = source(
     name="user_profile_source",
-    path=str(_DATA_DIR / "user_profile.parquet"),
-    timestamp_field="event_timestamp",
+    table="user_profile",
 )
 
-item_popularity_source = FileSource(
+item_popularity_source = source(
     name="item_popularity_source",
-    path=str(_DATA_DIR / "item_popularity.parquet"),
-    timestamp_field="event_timestamp",
+    table="item_popularity",
 )
 
-query_velocity_source = FileSource(
+query_velocity_source = source(
     name="query_velocity_source",
-    path=str(_DATA_DIR / "query_velocity.parquet"),
-    timestamp_field="event_timestamp",
+    table="query_velocity",
 )
 
 

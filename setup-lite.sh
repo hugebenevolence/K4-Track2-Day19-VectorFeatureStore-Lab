@@ -57,7 +57,8 @@ fi
 jupytext --to notebook --update notebooks/[0-9]*.py 2>/dev/null || jupytext --to notebook notebooks/[0-9]*.py
 
 # ── 5. .env scaffold ────────────────────────────────────────────────────
-[ -f .env ] || cp .env.example .env
+python scripts/select_mode.py lite
+python scripts/configure_feast.py lite
 
 # ── 6. Seed corpus + golden set ─────────────────────────────────────────
 python scripts/seed_corpus.py

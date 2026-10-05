@@ -57,7 +57,8 @@ notebooks: ## [both] Execute ALL notebooks headless (what the grader runs)
 clean-lite: ## [lite] Wipe venv + data + Feast registry
 	rm -rf $(VENV) data/corpus_vn.jsonl data/golden_set.jsonl data/qdrant_storage \
 	       data/agent_queries.jsonl \
-	       app/feast_repo/data app/feast_repo/registry.db app/feast_repo/online_store.db \
+	       app/feast_repo/data app/feast_repo/registry.db app/feast_repo/registry_docker.db \
+	       app/feast_repo/online_store.db \
 	       app/feast_repo_ondemand/data app/feast_repo_ondemand/registry.db \
 	       app/feast_repo_ondemand/online_store.db \
 	       notebooks/*.ipynb notebooks/.ipynb_checkpoints

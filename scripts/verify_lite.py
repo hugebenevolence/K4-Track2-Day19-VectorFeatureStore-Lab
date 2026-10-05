@@ -8,8 +8,11 @@ Exit code 0 on success; non-zero on first failure.
 from __future__ import annotations
 
 import sys
+import os
 import traceback
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -21,6 +24,11 @@ def step(label: str) -> None:
 def main() -> int:
     print("Day 19 lite smoke test")
     try:
+        sys.path.insert(0, str(ROOT))
+        from app import config as _config  # noqa: F401  -- load .env
+        assert os.getenv("QDRANT_MODE", "memory") == "memory", "Run `bash setup-lite.sh` to select Lite mode."
+        assert os.getenv("FEAST_OFFLINE_STORE", "file") == "file", "Feast source mode is not file."
+
         # ── 1. fastembed ────────────────────────────────────────────────
         step("fastembed loads + embeds (BAAI/bge-small-en-v1.5)")
         from fastembed import TextEmbedding
@@ -67,11 +75,14 @@ def main() -> int:
         step("Feast can init a local registry (SQLite online + file offline)")
         # Lazy import: feast pulls in pyarrow + pandas; keep startup fast.
         from feast import FeatureStore  # noqa: F401
-        # We don't `feast apply` here — that's exercise 04. Just confirm import.
+        config = yaml.safe_load(
+            (ROOT / "app" / "feast_repo" / "feature_store.yaml").read_text(encoding="utf-8")
+        )
+        assert config["online_store"]["type"] == "sqlite"
+        assert config["offline_store"]["type"] == "file"
 
         # ── 6. FastAPI app imports ──────────────────────────────────────
         step("FastAPI app imports without error")
-        sys.path.insert(0, str(ROOT))
         from app import main as app_main
         assert hasattr(app_main, "app"), "app.main.app missing"
 

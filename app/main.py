@@ -3,9 +3,8 @@
 Run: `make api`  (or `uvicorn app.main:app --reload --port 8000`)
 Try: curl 'http://localhost:8000/search?q=cloud+computing&mode=hybrid'
 
-The Searcher is built once at startup (lazy). On first request the embedding
-model is loaded — subsequent requests reuse it. P99 should be < 50 ms after
-warm-up; that's the rubric threshold.
+The Searcher is built once at startup. On Docker, a matching persistent index
+is reused; first indexing with bge-m3 on CPU can take several minutes.
 """
 from __future__ import annotations
 
@@ -28,8 +27,7 @@ _searcher: Searcher | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the Searcher once at startup. Embedding model + indexing the 1000
-    docs takes ~30s on first run. Cached on disk in subsequent runs."""
+    """Load the Searcher once at startup, reusing a matching Qdrant server index."""
     global _searcher
     if not CORPUS_PATH.exists():
         raise RuntimeError(

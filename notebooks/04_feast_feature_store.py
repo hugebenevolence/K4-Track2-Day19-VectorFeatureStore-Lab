@@ -7,7 +7,7 @@
 # %% [markdown]
 # # NB4 — Feast Feature Store: 3 Feature Views
 #
-# **Stack:** Feast (LF AI&Data 2024+) + SQLite online store + Parquet offline.
+# **Stack:** Feast + SQLite/Parquet (Lite) hoặc Redis/PostgreSQL (Docker).
 # Maps to slide §6 (Feast Feature Store) + deliverable bullet 3.
 #
 # > Mục tiêu: định nghĩa 3 feature views, sinh dữ liệu vào offline store
@@ -17,6 +17,7 @@
 # %%
 import _setup  # noqa: F401
 import subprocess
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -69,18 +70,32 @@ def make_query_velocity(n_users: int = 100) -> pl.DataFrame:
     })
 
 
-make_user_profile().write_parquet(FEAST_DATA / "user_profile.parquet")
-make_item_popularity().write_parquet(FEAST_DATA / "item_popularity.parquet")
-make_query_velocity().write_parquet(FEAST_DATA / "query_velocity.parquet")
+frames = {
+    "user_profile": make_user_profile(),
+    "item_popularity": make_item_popularity(),
+    "query_velocity": make_query_velocity(),
+}
+for table, frame in frames.items():
+    frame.write_parquet(FEAST_DATA / f"{table}.parquet")
 print(f"Wrote 3 Parquet sources to {FEAST_DATA}")
 for p in sorted(FEAST_DATA.glob("*.parquet")):
     print(f"  {p.name}  {p.stat().st_size/1024:.1f} KB")
+
+if os.getenv("FEAST_OFFLINE_STORE", "file") == "postgres":
+    from sqlalchemy import create_engine
+
+    url = os.getenv("POSTGRES_URL", "postgresql://feast:feast@localhost:5432/feast_offline")
+    engine = create_engine(url.replace("postgresql://", "postgresql+psycopg://", 1))
+    for table, frame in frames.items():
+        frame.to_pandas().to_sql(table, engine, if_exists="replace", index=False)
+        print(f"Loaded {frame.height} rows into PostgreSQL table {table}")
+    engine.dispose()
 
 # %% [markdown]
 # ## 2. `feast apply` — register 3 feature views với metadata registry
 #
 # `app/feast_repo/feature_views.py` đã định nghĩa 3 feature views (xem file đó).
-# Chạy `feast apply` để Feast đọc file definition và ghi vào `registry.db`.
+# Chạy `feast apply` để Feast đọc definitions và ghi vào registry của path hiện tại.
 
 # %%
 res = subprocess.run(
@@ -114,8 +129,7 @@ if res.stderr:
     print(res.stderr[-500:])
 assert res.returncode == 0, f"materialize failed: {res.stderr}"
 
-# Feast's CLI progress bars vary by version/terminal. Read the SQLite online
-# tables so the evidence always includes an exact count of materialized values.
+# Feast's CLI progress bars vary by version/terminal. Count SQLite values in Lite.
 import sqlite3
 import yaml
 
@@ -156,6 +170,8 @@ features = fs.get_online_features(
     features=REQUEST_FEATURES,
     entity_rows=[{"user_id": "u_001"}],
 ).to_dict()
+assert all(features[name.split(":", 1)[1]][0] is not None for name in REQUEST_FEATURES), \
+    "Online features missing; verify source rows and the active Feast registry"
 single_latency_ms = (time.perf_counter() - t0) * 1000
 print(f"Single lookup: {single_latency_ms:.2f}ms")
 print({k: v[0] for k, v in features.items()})

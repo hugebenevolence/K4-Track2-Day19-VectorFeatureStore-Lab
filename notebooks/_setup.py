@@ -19,6 +19,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from app import config as _config  # noqa: E402,F401  -- propagate .env to Feast CLI
+
 # Notebooks shell out to the `feast` CLI. Under `make lab` the venv is already
 # active, but under nbconvert / CI it is not, and the call dies with
 # FileNotFoundError: 'feast'. Put the running interpreter's bin dir on PATH so

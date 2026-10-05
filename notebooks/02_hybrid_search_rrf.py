@@ -19,15 +19,19 @@
 # %%
 import _setup  # noqa: F401
 import json
+import hashlib
 import statistics
 from pathlib import Path
 
-from fastembed import TextEmbedding
+import os
+
+from app.embeddings import Embedder
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from rank_bm25 import BM25Okapi
 
 DATA = Path(_setup.__file__).resolve().parent.parent / "data"
+CORPUS_SHA256 = hashlib.sha256((DATA / "corpus_vn.jsonl").read_bytes()).hexdigest()
 
 # %% [markdown]
 # ## 1. Reload corpus + build both indices
@@ -40,25 +44,43 @@ tokenized = [(d["title"] + " " + d["text"]).lower().split() for d in docs]
 bm25 = BM25Okapi(tokenized)
 
 # Vector
-embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-client = QdrantClient(":memory:")
-client.create_collection(
-    collection_name="lab19",
-    vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+embedder = Embedder()
+server_mode = os.getenv("QDRANT_MODE", "memory") == "server"
+client = QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333")) if server_mode else QdrantClient(":memory:")
+exists = client.collection_exists("lab19")
+first = client.retrieve("lab19", ids=[0], with_payload=True) if server_mode and exists else []
+reuse = (
+    server_mode and exists
+    and client.get_collection("lab19").config.params.vectors.size == embedder.dim
+    and client.count("lab19").count == len(docs)
+    and first
+    and first[0].payload.get("embedding_model") == embedder.model_name
+    and first[0].payload.get("corpus_sha256") == CORPUS_SHA256
 )
-BATCH = 64
-points = []
-for start in range(0, len(docs), BATCH):
-    batch = docs[start:start + BATCH]
-    texts = [d["title"] + " " + d["text"] for d in batch]
-    vectors = list(embedder.embed(texts))
-    for i, (d, v) in enumerate(zip(batch, vectors)):
-        points.append(PointStruct(
-            id=start + i, vector=v.tolist(),
-            payload={"doc_id": d["doc_id"], "topic": d["topic"]},
-        ))
-client.upsert(collection_name="lab19", points=points)
-print(f"BM25 + vector indices ready ({len(docs)} docs)")
+if exists and not reuse:
+    client.delete_collection("lab19")
+if not reuse:
+    client.create_collection(
+        collection_name="lab19",
+        vectors_config=VectorParams(size=embedder.dim, distance=Distance.COSINE),
+    )
+    BATCH = 64
+    points = []
+    for start in range(0, len(docs), BATCH):
+        batch = docs[start:start + BATCH]
+        texts = [d["title"] + " " + d["text"] for d in batch]
+        vectors = list(embedder.embed(texts))
+        for i, (d, v) in enumerate(zip(batch, vectors)):
+            points.append(PointStruct(
+                id=start + i, vector=v.tolist(),
+                payload={
+                    "doc_id": d["doc_id"], "topic": d["topic"],
+                    "embedding_model": embedder.model_name,
+                    "corpus_sha256": CORPUS_SHA256,
+                },
+            ))
+    client.upsert(collection_name="lab19", points=points)
+print(f"BM25 + vector indices ready ({len(docs)} docs; {embedder.backend}, {embedder.dim}d; reused={reuse})")
 
 # %% [markdown]
 # ## 2. Per-mode search functions
@@ -144,7 +166,10 @@ for q in golden:
 print(f"Precision@10 (avg over {len(golden)} queries):")
 print(f"  Keyword (BM25)   : {statistics.mean(p_kw):.1%}")
 print(f"  Semantic (vector): {statistics.mean(p_sem):.1%}")
-print(f"  Hybrid  (RRF=60) : {statistics.mean(p_hyb):.1%}   <- should win")
+print(f"  Hybrid  (RRF=60) : {statistics.mean(p_hyb):.1%}")
+scores = {"keyword": statistics.mean(p_kw), "semantic": statistics.mean(p_sem),
+          "hybrid": statistics.mean(p_hyb)}
+print(f"  Winner: {max(scores, key=scores.get)}")
 
 # %% [markdown]
 # ## 5. Slice theo loại query
@@ -176,16 +201,14 @@ for t in ("exact", "paraphrase", "mixed"):
 #   thường ngang bằng (keyword signal đã đủ mạnh).
 # - `paraphrase` queries dùng từ Việt **không** xuất hiện verbatim trong docs
 #   → cả BM25 và vector đều giảm điểm. Trên synthetic corpus 1000-doc với
-#   embedding model `BAAI/bge-small-en-v1.5` (English-trained), semantic
-#   recall trên Vietnamese paraphrases yếu (24-32%). **Đổi sang `bge-m3`
-#   (full Docker path) sẽ giúp semantic thắng paraphrase queries** — đây là
-#   teaching moment cho "embedding model choice matters".
-# - `mixed` queries có cả từ exact + ý tưởng paraphrased → **hybrid thắng rõ**
-#   (~100% vs 97-98% pure modes). Đây là pattern production-relevant nhất
-#   vì user thật ít khi viết query 100% exact term hoặc 100% paraphrase.
+#   embedding model mặc định `BAAI/bge-small-en-v1.5` (English-trained), semantic
+#   recall trên Vietnamese paraphrases yếu. Chạy Docker path với `bge-m3` rồi
+#   đo lại thay vì giả định một mức cải thiện cố định.
+# - `mixed` queries có cả từ exact + ý tưởng paraphrased. Trên Lite, hybrid
+#   thường thắng; với `bge-m3` mạnh hơn, pure vector có thể thắng.
 #
-# Hybrid thắng *trung bình* nhờ robust trên mọi kiểu query — đó là lý do
-# production luôn default hybrid (deck §3, slide "Hybrid Search Mechanics").
+# Luôn đọc bảng số đo: RRF không bảo đảm hơn từng retriever trên mọi corpus.
+# Khi một model đa ngữ tốt vượt trội, BM25 có thể làm giảm precision của fusion.
 
 # %% [markdown]
 # ## Deliverable evidence

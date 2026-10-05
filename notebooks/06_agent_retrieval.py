@@ -167,8 +167,10 @@ for c in res.trace:
 store = None
 try:
     from feast import FeatureStore
+    import yaml
     repo = Path(_setup.__file__).resolve().parent.parent / "app" / "feast_repo"
-    if (repo / "registry.db").exists():
+    registry = yaml.safe_load((repo / "feature_store.yaml").read_text(encoding="utf-8"))["registry"]
+    if (repo / registry).exists():
         store = FeatureStore(repo_path=str(repo))
 except Exception as exc:  # noqa: BLE001
     print("Feast chưa sẵn sàng:", exc)

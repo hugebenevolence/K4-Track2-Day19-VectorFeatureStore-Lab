@@ -8,10 +8,11 @@ Build hybrid search API + Feast feature store hoàn chỉnh, đo Precision@10 v�
 | Path | Stack | Setup | RAM | Khi nào dùng |
 |---|---|---|---|---|
 | **Lite (default)** | `fastembed` + Qdrant in-memory + SQLite Feast + FastAPI | `bash setup-lite.sh` (~60 s) | ~700 MB | Hầu hết học viên — laptop yếu, không Docker, focus vào concept |
-| **Docker (full)** | Qdrant server + Redis + Postgres + **bge-m3** (1024d, đa ngữ) | `bash setup-docker.sh` (~3-8 min) | ~6 GB | Muốn stack production thật + embedding tốt cho tiếng Việt |
+| **Docker (full)** | Qdrant server + Redis + Postgres + **bge-m3** (1024d, đa ngữ) | `bash setup-docker.sh` (tùy tải model/CPU) | ~6 GB | Muốn stack production thật + embedding tốt cho tiếng Việt |
 
-> Cả hai paths dùng **cùng `qdrant-client` API và Feast definitions** — bạn có
-> thể đổi giữa hai paths bất cứ lúc nào bằng cách đổi `QDRANT_MODE` trong `.env`.
+> Cả hai paths dùng cùng API. Chạy lại `bash setup-lite.sh` hoặc
+> `bash setup-docker.sh` khi đổi path; script cập nhật `.env` và sinh cấu hình
+> Feast tương ứng. Sau đó chạy lại notebook để index/materialize dữ liệu.
 
 > **Embedding model là một biến thật.** `EMBEDDING_BACKEND` trong `.env` chọn
 > giữa `fastembed` (bge-small, 384d, tiếng Anh — mặc định lite),
@@ -25,7 +26,7 @@ Build hybrid search API + Feast feature store hoàn chỉnh, đo Precision@10 v�
 ## Quick Start — Lite (recommended)
 
 ```bash
-git clone https://github.com/<your-username>/K4-Track2-Day19-VectorFeatureStore-Lab.git
+git clone https://github.com/hugebenevolence/K4-Track2-Day19-VectorFeatureStore-Lab.git
 cd K4-Track2-Day19-VectorFeatureStore-Lab
 bash setup-lite.sh    # ~60 s — venv + deps + seed corpus + smoke test
 make api &            # FastAPI on :8000
@@ -53,6 +54,8 @@ Máy Windows không có GNU Make có thể chạy các bước tương đương:
 $env:PYTHONUTF8 = '1'
 uv venv --python 3.13 .venv
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.venv\Scripts\python.exe scripts\select_mode.py lite
+.venv\Scripts\python.exe scripts\configure_feast.py lite
 .venv\Scripts\python.exe scripts\seed_corpus.py
 .venv\Scripts\python.exe scripts\gen_agent_queries.py
 .venv\Scripts\python.exe scripts\gen_spend.py
@@ -77,7 +80,7 @@ make seed            Both: regenerate data/ files
 make api             Lite: FastAPI on :8000
 make lab             Lite: Jupyter Lab on :8888
 make benchmark       Both: Precision@10 + P99 latency table
-make test            Both: pytest (41 tests)
+make test            Both: pytest (42 tests)
 make gen-advanced    Both: regenerate NB6 compound queries + NB8 spend parquet
 make notebooks       Both: execute ALL notebooks headless (what the grader runs)
 make clean-lite      Lite: wipe venv + data + Feast registry
@@ -94,13 +97,40 @@ make docker-clean    Docker: stop + wipe volumes
 ## Quick Start — Docker (full stack)
 
 ```bash
-bash setup-docker.sh    # ~3 min on first run (image pulls ~500 MB)
+bash setup-docker.sh    # image pulls + bge-m3 indexing may take several minutes
 make api &
 make benchmark
 ```
 
 Yêu cầu: RAM ≥ 8 GB free, port 6333/6379/5432 không xung đột.
 Endpoints: Qdrant http://localhost:6333 · Redis :6379 · Postgres :5432
+
+`setup-docker.sh` chọn `bge-m3`, tạo cấu hình Feast Redis/PostgreSQL và kiểm tra
+cả ba dịch vụ. Chạy **NB4** để nạp 3 bảng vào PostgreSQL, `feast apply`,
+materialize sang Redis, rồi đo online lookup và PIT join. Chạy lại **NB1–NB2**
+để index Qdrant server bằng embedding 1024 chiều và đo lại Precision@10.
+Lần đầu dùng `bge-m3` cần tải model lớn nên thời gian thực tế phụ thuộc mạng.
+Trong lần đo trên 50 queries của lab, path Docker đạt Precision@10: BM25 77,8%,
+vector 95,2%, hybrid 89,0%. RRF không luôn vượt model vector mạnh; xem
+`submission/REFLECTION.md` để biết khi nào nên dùng từng mode. Kết quả chạy
+thật và giới hạn latency CPU có trong `submission/DOCKER-VALIDATION.md`.
+
+Trên Windows PowerShell, sau khi đã tạo `.venv` như hướng dẫn Lite:
+
+```powershell
+docker compose up -d
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt -r requirements-full.txt
+.venv\Scripts\python.exe scripts\select_mode.py docker
+.venv\Scripts\python.exe scripts\configure_feast.py docker
+.venv\Scripts\python.exe scripts\seed_corpus.py
+.venv\Scripts\python.exe scripts\gen_agent_queries.py
+.venv\Scripts\python.exe scripts\gen_spend.py
+.venv\Scripts\python.exe scripts\verify_docker.py
+```
+
+Sau đó chạy NB4 để materialize, NB1–NB2 để đo embedding đa ngữ. Khi trở lại
+Lite, chạy `select_mode.py lite`, `configure_feast.py lite` rồi
+`gen_agent_queries.py` để golden set của NB6 khớp với model Lite.
 
 ### Ba runtime, không phải chỉ Docker
 
@@ -253,7 +283,7 @@ học viên cũng được. Full brief + self-checklist:
 │   ├── main.py                     # FastAPI /search endpoint
 │   ├── search.py                   # Searcher class (kw / sem / hybrid)
 │   └── feast_repo/
-│       ├── feature_store.yaml      # Feast config (lite vs docker)
+│       ├── feature_store.yaml      # generated by setup-lite/setup-docker (ignored)
 │       └── feature_views.py        # 3 feature views definition
 ├── scripts/
 │   ├── seed_corpus.py              # 1000 VN docs + 50 golden queries (deterministic)
@@ -277,7 +307,7 @@ học viên cũng được. Full brief + self-checklist:
 | NB1 báo `expected 1000 indexed, got X` | Chưa `make seed`; chạy lại |
 | NB2 hybrid không thắng | Check RRF công thức: `1/(k + rank)` **rank 1-based**, không phải 0-based |
 | NB3 P99 > 50ms | Bình thường ở cold start. Chạy 10 query warmup trước rồi đo lại. |
-| NB4 `feast apply` lỗi | Xoá `app/feast_repo/registry.db` và chạy lại |
+| NB4 `feast apply` lỗi | Kiểm tra `.env` và `feature_store.yaml`; Lite dùng `registry.db`, Docker dùng `registry_docker.db` |
 | Docker path: `port 6333 already allocated` | `docker compose down` rồi `docker compose up -d` |
 | Docker path: Qdrant timeout | Đợi 60s sau `docker compose up`; image lần đầu pull ~200MB |
 
@@ -291,7 +321,7 @@ học viên cũng được. Full brief + self-checklist:
    ```bash
    # Hoặc tạo new repo trên github.com:
    git init -b main
-   git remote add origin https://github.com/<your-username>/K4-Track2-Day19-VectorFeatureStore-Lab.git
+   git remote add origin https://github.com/hugebenevolence/K4-Track2-Day19-VectorFeatureStore-Lab.git
    ```
 2. Hoàn thành notebooks (giữ output cells trong `.ipynb`) — NB1–NB4 bắt buộc, NB5–NB8 nâng cao.
 3. Add ảnh chụp vào `submission/screenshots/`:

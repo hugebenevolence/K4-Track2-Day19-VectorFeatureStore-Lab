@@ -36,3 +36,4 @@ nbconvert>=7.16,<8.0               # preserve executed .ipynb outputs
 
 # Test
 pytest>=8.3,<9.0
+python-dotenv>=1.0,<2.0                # .env selects Lite or Docker across app/notebooks

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full Docker path: Qdrant server + Redis online store + Postgres offline store.
-# Same Python venv as lite + the docker extras. ~3-5 min on first run (image pulls).
+# Same Python venv as lite + docker extras; first bge-m3 indexing can take minutes.
 
 set -euo pipefail
 
@@ -26,12 +26,7 @@ fi
 case "$RUNTIME" in
   docker)
     echo "[docker] using docker compose"
-    docker compose up -d
-    echo "[docker] Waiting up to 30s for services to become healthy..."
-    for i in $(seq 1 30); do
-      if docker compose ps --format json | grep -q '"Health":"healthy"'; then break; fi
-      sleep 1
-    done
+    docker compose up -d --wait --wait-timeout 60
     ;;
   apple)
     echo "[docker] Docker unavailable; using Apple container (github.com/apple/container)"
@@ -89,17 +84,8 @@ fi
 jupytext --to notebook --update notebooks/[0-9]*.py 2>/dev/null || jupytext --to notebook notebooks/[0-9]*.py
 
 # ── 5. .env for docker mode ─────────────────────────────────────────────
-if [ ! -f .env ]; then
-  cp .env.example .env
-  # Flip the lite defaults to docker — the user can edit afterward.
-  sed -i.bak \
-    -e 's/^QDRANT_MODE=memory/QDRANT_MODE=server/' \
-    -e 's/^EMBEDDING_BACKEND=fastembed/EMBEDDING_BACKEND=bge-m3/' \
-    -e 's/^FEAST_ONLINE_STORE=sqlite/FEAST_ONLINE_STORE=redis/' \
-    -e 's/^FEAST_OFFLINE_STORE=file/FEAST_OFFLINE_STORE=postgres/' \
-    .env
-  rm -f .env.bak
-fi
+python scripts/select_mode.py docker
+python scripts/configure_feast.py docker
 
 # ── 6. Seed corpus + smoke test ─────────────────────────────────────────
 python scripts/seed_corpus.py

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -52,6 +53,7 @@ class Searcher:
         self.bm25: BM25Okapi | None = None
         self.client: QdrantClient | None = None
         self.embedder: Embedder | None = None
+        self.corpus_sha256: str = ""
 
     @property
     def size(self) -> int:
@@ -77,6 +79,7 @@ class Searcher:
 
     # ── ingestion ───────────────────────────────────────────────────────
     def _load_docs(self, corpus_path: Path) -> None:
+        self.corpus_sha256 = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
         with corpus_path.open(encoding="utf-8") as f:
             for line in f:
                 d = json.loads(line)
@@ -100,9 +103,20 @@ class Searcher:
         else:
             self.client = QdrantClient(":memory:")
 
-        # Recreate is OK in lite mode (it's in-memory); for server, only create if missing.
+        # Server indexes persist across API restarts. Reuse only when the model
+        # and exact corpus match; equal vector dimensions alone are insufficient.
         existing = {c.name for c in self.client.get_collections().collections}
         if COLLECTION in existing and mode == "server":
+            info = self.client.get_collection(COLLECTION)
+            first = self.client.retrieve(COLLECTION, ids=[0], with_payload=True)
+            if (
+                info.config.params.vectors.size == self.embedder.dim
+                and self.client.count(COLLECTION).count == len(self.docs)
+                and first
+                and first[0].payload.get("embedding_model") == self.embedder.model_name
+                and first[0].payload.get("corpus_sha256") == self.corpus_sha256
+            ):
+                return
             self.client.delete_collection(COLLECTION)
         self.client.create_collection(
             collection_name=COLLECTION,
@@ -122,7 +136,11 @@ class Searcher:
                 points.append(PointStruct(
                     id=start + i,
                     vector=v.tolist(),
-                    payload={"doc_id": d["doc_id"], "title": d["title"], "text": d["text"]},
+                    payload={
+                        "doc_id": d["doc_id"], "title": d["title"], "text": d["text"],
+                        "embedding_model": self.embedder.model_name,
+                        "corpus_sha256": self.corpus_sha256,
+                    },
                 ))
         self.client.upsert(collection_name=COLLECTION, points=points)
 
