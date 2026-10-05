@@ -114,6 +114,20 @@ if res.stderr:
     print(res.stderr[-500:])
 assert res.returncode == 0, f"materialize failed: {res.stderr}"
 
+# Feast's CLI progress bars vary by version/terminal. Read the SQLite online
+# tables so the evidence always includes an exact count of materialized values.
+import sqlite3
+import yaml
+
+online_type = yaml.safe_load((FEAST_DIR / "feature_store.yaml").read_text(encoding="utf-8"))["online_store"]["type"]
+if online_type == "sqlite":
+    with sqlite3.connect(FEAST_DIR / "online_store.db") as connection:
+        for view in ("user_profile_features", "item_popularity_features", "query_velocity_features"):
+            n_values = connection.execute(f"SELECT COUNT(*) FROM lab19_{view}").fetchone()[0]
+            print(f"Materialized {view}: {n_values} online feature values")
+else:
+    print(f"Materialized to {online_type}; online lookup below verifies serving values")
+
 # %% [markdown]
 # ## 4. Online lookup — đo latency
 #
@@ -147,7 +161,7 @@ print(f"Single lookup: {single_latency_ms:.2f}ms")
 print({k: v[0] for k, v in features.items()})
 
 # %% [markdown]
-# ## 5. TODO — Batch latency benchmark (100 lookups, P99)
+# ## 5. Batch latency benchmark (100 lookups, P99)
 
 # %%
 latencies: list[float] = []
@@ -185,7 +199,7 @@ else:
 import pandas as pd
 entity_df = pd.DataFrame({
     "user_id": ["u_001", "u_002", "u_003"],
-    "event_timestamp": [NOW - timedelta(hours=2), NOW - timedelta(hours=1), NOW],
+    "event_timestamp": [NOW - timedelta(minutes=30), NOW - timedelta(hours=1), NOW],
 })
 
 historical = fs.get_historical_features(

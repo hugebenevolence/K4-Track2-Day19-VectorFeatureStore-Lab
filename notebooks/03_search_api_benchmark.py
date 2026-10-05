@@ -36,10 +36,11 @@ proc = subprocess.Popen(
 )
 
 # Đợi server up + warm (Searcher.from_corpus loads embeddings + indexes 1000 docs)
-URL = "http://localhost:8000"
+URL = "http://127.0.0.1:8000"
+http_client = httpx.Client(timeout=30.0)
 for _ in range(60):
     try:
-        r = httpx.get(f"{URL}/healthz", timeout=2.0)
+        r = http_client.get(f"{URL}/healthz", timeout=2.0)
         if r.status_code == 200 and r.json().get("ready"):
             break
     except httpx.HTTPError:
@@ -48,13 +49,13 @@ for _ in range(60):
 else:
     raise RuntimeError("API didn't become ready within 60s")
 
-print(httpx.get(f"{URL}/healthz").json())
+print(http_client.get(f"{URL}/healthz").json())
 
 # %% [markdown]
 # ## 2. Single query — kiểm tra response shape
 
 # %%
-r = httpx.get(f"{URL}/search", params={"q": "cloud computing tự động mở rộng", "mode": "hybrid"})
+r = http_client.get(f"{URL}/search", params={"q": "cloud computing tự động mở rộng", "mode": "hybrid"})
 r.raise_for_status()
 body = r.json()
 print(f"latency_ms: {body['latency_ms']:.1f}")
@@ -63,7 +64,7 @@ for h in body["hits"][:3]:
     print(f"  {h['doc_id']:>14}  score={h['score']:.4f}  {h['title']}")
 
 # %% [markdown]
-# ## 3. TODO — Latency benchmark (100 queries × 3 modes)
+# ## 3. Latency benchmark (100 queries × 3 modes)
 #
 # Dùng 50 golden queries × 2 reps = 100 calls/mode. Ghi nhận latency từ
 # `body["latency_ms"]` (server-side, đã trừ network) HOẶC từ wall-clock httpx
@@ -76,6 +77,8 @@ import json
 
 DATA = ROOT / "data"
 golden = [json.loads(l) for l in (DATA / "golden_set.jsonl").open(encoding="utf-8")]
+for q in golden[:10]:
+    http_client.get(f"{URL}/search", params={"q": q["query"], "mode": "hybrid"}).raise_for_status()
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -91,7 +94,8 @@ def benchmark_mode(mode: str, reps: int = 2) -> dict[str, float]:
     for _ in range(reps):
         for q in golden:
             t0 = time.perf_counter()
-            r = httpx.get(f"{URL}/search", params={"q": q["query"], "mode": mode})
+            r = http_client.get(f"{URL}/search", params={"q": q["query"], "mode": mode})
+            r.raise_for_status()
             wall_latencies.append((time.perf_counter() - t0) * 1000)
             server_latencies.append(r.json()["latency_ms"])
     return {
@@ -129,6 +133,7 @@ else:
 # %%
 proc.terminate()
 proc.wait(timeout=5)
+http_client.close()
 print("API server stopped")
 
 # %% [markdown]

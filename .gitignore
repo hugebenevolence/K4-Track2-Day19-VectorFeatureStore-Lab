@@ -31,6 +31,8 @@ app/feast_repo/online_store.db
 .idea/
 .vscode/
 *.swp
+.run-logs/
+.playwright-cli/
 
 # Advanced-mission generated artifacts (NB6 + NB8)
 data/agent_queries.jsonl

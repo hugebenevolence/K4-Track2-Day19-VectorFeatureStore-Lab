@@ -45,6 +45,29 @@ Yêu cầu: **Python 3.10–3.14**. Không cần Docker, không cần GPU, khôn
 Khi `setup-lite.sh` báo `All checks passed`, mở
 **http://localhost:8888/lab/tree/01_embeddings_index.ipynb** và bắt đầu.
 
+### Windows PowerShell (Lite)
+
+Máy Windows không có GNU Make có thể chạy các bước tương đương:
+
+```powershell
+$env:PYTHONUTF8 = '1'
+uv venv --python 3.13 .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.venv\Scripts\python.exe scripts\seed_corpus.py
+.venv\Scripts\python.exe scripts\gen_agent_queries.py
+.venv\Scripts\python.exe scripts\gen_spend.py
+.venv\Scripts\python.exe scripts\verify_lite.py
+.venv\Scripts\pytest.exe -q
+.venv\Scripts\jupytext.exe --to notebook notebooks\[0-9]*.py
+foreach ($nb in Get-ChildItem notebooks\[0-9]*.ipynb) {
+    .venv\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace $nb.FullName --ExecutePreprocessor.timeout=900
+}
+.venv\Scripts\python.exe bonus\demo.py
+```
+
+`PYTHONUTF8=1` giữ output tiếng Việt khi PowerShell dùng encoding mặc định
+khác UTF-8. Chạy notebook theo thứ tự số để NB6 đọc feature đã materialize ở NB4.
+
 ### Tất cả lệnh `make`
 
 ```
@@ -54,7 +77,7 @@ make seed            Both: regenerate data/ files
 make api             Lite: FastAPI on :8000
 make lab             Lite: Jupyter Lab on :8888
 make benchmark       Both: Precision@10 + P99 latency table
-make test            Both: pytest (34 tests, ~2 s)
+make test            Both: pytest (41 tests)
 make gen-advanced    Both: regenerate NB6 compound queries + NB8 spend parquet
 make notebooks       Both: execute ALL notebooks headless (what the grader runs)
 make clean-lite      Lite: wipe venv + data + Feast registry
@@ -216,12 +239,16 @@ học viên cũng được. Full brief + self-checklist:
 ├── requirements-full.txt           # docker extras
 ├── pyproject.toml                  # for `uv` users
 ├── .env.example                    # env template
-├── notebooks/                      # 4 Jupytext .py files (source of truth)
+├── notebooks/                      # 8 Jupytext .py files (source of truth)
 │   ├── _setup.py
 │   ├── 01_embeddings_index.py
 │   ├── 02_hybrid_search_rrf.py
 │   ├── 03_search_api_benchmark.py
-│   └── 04_feast_feature_store.py
+│   ├── 04_feast_feature_store.py
+│   ├── 05_filtered_search.py
+│   ├── 06_agent_retrieval.py
+│   ├── 07_semantic_cache.py
+│   └── 08_feature_engineering.py
 ├── app/
 │   ├── main.py                     # FastAPI /search endpoint
 │   ├── search.py                   # Searcher class (kw / sem / hybrid)

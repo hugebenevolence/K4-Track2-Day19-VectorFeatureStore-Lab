@@ -31,6 +31,8 @@ pyarrow>=17,<26                         # <22 had no cp314 wheel -> source build
 # Notebook
 jupyterlab>=4.3,<5.0
 jupytext>=1.16,<2.0
+ipykernel>=6.29,<8.0                # execute notebooks headlessly
+nbconvert>=7.16,<8.0               # preserve executed .ipynb outputs
 
 # Test
 pytest>=8.3,<9.0
